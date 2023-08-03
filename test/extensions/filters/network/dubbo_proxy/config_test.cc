@@ -98,12 +98,22 @@ TEST_F(DubboFilterConfigTest, DubboProxyWithEmptyProto) {
 
 // Test config with an explicitly defined router filter.
 TEST_F(DubboFilterConfigTest, DubboProxyWithExplicitRouterConfig) {
+
   const std::string yaml = R"EOF(
     stat_prefix: dubbo
     multiple_route_config:
       name: local_route
     dubbo_filters:
       - name: envoy.filters.dubbo.router
+    access_log:
+      - name: envoy.access_loggers.file
+        typed_config:
+          "@type": "type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog"
+          path: /tmp/envoy_dubbo_acc.log
+          log_format:
+            text_format_source:
+              inline_string: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH):256% %PROTOCOL%\" %RESPONSE_CODE% %RESPONSE_FLAGS% %ROUTE_NAME% %BYTES_RECEIVED% %BYTES_SENT% %UPSTREAM_WIRE_BYTES_RECEIVED% %UPSTREAM_WIRE_BYTES_SENT% %DURATION% %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% \"%REQ(X-FORWARDED-FOR)%\" \"%REQ(USER-AGENT)%\" \"%REQ(X-REQUEST-ID)%\"  \"%REQ(:AUTHORITY)%\"\n"
+
     )EOF";
 
   DubboProxyProto config = parseDubboProxyFromV3Yaml(yaml);

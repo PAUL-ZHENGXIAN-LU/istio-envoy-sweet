@@ -34,6 +34,7 @@ public:
   virtual DubboFilterStats& stats() PURE;
   virtual ProtocolPtr createProtocol() PURE;
   virtual Router::Config& routerConfig() PURE;
+  virtual const std::vector<AccessLog::InstanceSharedPtr>& accessLogs() const PURE;
 };
 
 // class ActiveMessagePtr;
@@ -75,6 +76,10 @@ public:
   void deferredMessage(ActiveMessage& message);
   void sendLocalReply(MessageMetadata& metadata, const DubboFilters::DirectResponse& response,
                       bool end_stream);
+
+  void emitLogEntry(const Http::RequestHeaderMap* request_headers,
+                    const Http::ResponseHeaderMap* response_headers,
+                    const StreamInfo::StreamInfo& stream_info);
 
   // This function is for testing only.
   std::list<ActiveMessagePtr>& getActiveMessagesForTest() { return active_message_list_; }

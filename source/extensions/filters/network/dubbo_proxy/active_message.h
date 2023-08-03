@@ -43,6 +43,7 @@ public:
   StreamHandler& newStream() override { return *this; }
   void onHeartbeat(MessageMetadataSharedPtr) override {}
 
+  MessageMetadataSharedPtr metadata() const { return metadata_; }
   uint64_t requestId() const { return metadata_ ? metadata_->requestId() : 0; }
 
 private:
@@ -180,8 +181,14 @@ public:
   void onReset();
   void onError(const std::string& what);
   MessageMetadataSharedPtr metadata() const { return metadata_; }
+
+  bool hasResponseDecoder() const { return response_decoder_ != nullptr; }
+  const ActiveResponseDecoder& response_decoder() const { return *response_decoder_; }
+  const StreamInfo::StreamInfoImpl &stream_info() { return stream_info_; }
+
   ContextSharedPtr context() const { return context_; }
   bool pendingStreamDecoded() const { return pending_stream_decoded_; }
+
 
 private:
   void addDecoderFilterWorker(DubboFilters::DecoderFilterSharedPtr filter, bool dual_filter);

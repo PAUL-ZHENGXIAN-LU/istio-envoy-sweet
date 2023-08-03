@@ -101,6 +101,8 @@ envoy_cc_extension(
         "//envoy/registry",
         "//envoy/stats:stats_interface",
         "//envoy/stats:stats_macros",
+        "//envoy/access_log:access_log_interface",
+        "//source/common/access_log:access_log_lib",
         "//source/common/common:utility_lib",
         "//source/common/config:utility_lib",
         "//source/extensions/filters/network:well_known_names",

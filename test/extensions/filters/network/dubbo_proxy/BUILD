@@ -98,6 +98,7 @@ envoy_extension_cc_test(
     deps = [
         ":mocks_lib",
         ":utility_lib",
+        "//source/extensions/access_loggers/file:config",
         "//source/extensions/filters/network/dubbo_proxy:config",
         "//source/extensions/filters/network/dubbo_proxy/filters:filter_config_interface",
         "//test/mocks/server:factory_context_mocks",
@@ -206,6 +207,7 @@ envoy_extension_cc_test(
     deps = [
         ":mocks_lib",
         ":utility_lib",
+        "//source/extensions/access_loggers/file:config",
         "//source/extensions/filters/network/dubbo_proxy:config",
         "//source/extensions/filters/network/dubbo_proxy:conn_manager_lib",
         "//source/extensions/filters/network/dubbo_proxy:dubbo_hessian2_serializer_impl_lib",

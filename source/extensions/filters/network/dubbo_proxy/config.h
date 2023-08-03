@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 
+#include "envoy/access_log/access_log.h"
 #include "envoy/extensions/filters/network/dubbo_proxy/v3/dubbo_proxy.pb.h"
 #include "envoy/extensions/filters/network/dubbo_proxy/v3/dubbo_proxy.pb.validate.h"
 
@@ -58,6 +59,10 @@ public:
   Router::Config& routerConfig() override { return *this; }
   ProtocolPtr createProtocol() override;
 
+  const std::vector<AccessLog::InstanceSharedPtr>& accessLogs() const override {
+    return access_logs_;
+  }
+
 private:
   void registerFilter(const DubboFilterConfig& proto_config);
 
@@ -70,6 +75,8 @@ private:
   Rds::RouteConfigProviderSharedPtr route_config_provider_;
 
   std::list<DubboFilters::FilterFactoryCb> filter_factories_;
+
+   std::vector<AccessLog::InstanceSharedPtr> access_logs_;
 };
 
 } // namespace DubboProxy

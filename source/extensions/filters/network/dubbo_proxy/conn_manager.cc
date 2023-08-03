@@ -152,6 +152,28 @@ void ConnectionManager::deferredMessage(ActiveMessage& message) {
   if (!message.inserted()) {
     return;
   }
+
+  message.streamInfo().onRequestComplete();
+  //stream_info_.addBytesReceived(1);
+   // stream_info_.addBytesSent(2);
+
+  const Http::RequestHeaderMap* request_headers = nullptr;
+  if(message.metadata() && message.metadata()->hasInvocationInfo()){
+    const auto invocation = dynamic_cast<const RpcInvocationImpl*>(&(message.metadata()->invocationInfo()));
+    const auto p_headers = dynamic_cast<const Http::RequestHeaderMap*>(&(invocation->attachment().headers()));
+    request_headers =  p_headers;
+  }
+ 
+ ENVOY_LOG(debug, "active message end, start acess log");
+  auto response = Http::ResponseHeaderMapImpl::create();
+  const Http::ResponseHeaderMap* response_headers = response.get();
+  if(message.hasResponseDecoder() && message.response_decoder().metadata()){
+    //auto lowcase_key = Http::LowerCaseString(key);
+    //response_headers->remove(lowcase_key);
+    //response_headers->addCopy(lowcase_key, value);
+  } 
+  emitLogEntry(request_headers, response_headers, message.streamInfo());
+
   read_callbacks_->connection().dispatcher().deferredDelete(
       message.removeFromList(active_message_list_));
 }
@@ -169,6 +191,17 @@ void ConnectionManager::resetAllMessages(bool local_reset) {
     active_message_list_.front()->onReset();
   }
 }
+
+void ConnectionManager::emitLogEntry(const Http::RequestHeaderMap* request_headers,
+                    const Http::ResponseHeaderMap* response_headers,
+                    const StreamInfo::StreamInfo& stream_info) { 
+
+  for (const auto& access_log : config_.accessLogs()) {
+    ENVOY_LOG(debug, "log access... ");
+    access_log->log(request_headers, response_headers, nullptr, stream_info);
+  }
+}
+
 
 } // namespace DubboProxy
 } // namespace NetworkFilters

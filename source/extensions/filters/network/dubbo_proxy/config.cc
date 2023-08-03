@@ -4,6 +4,7 @@
 #include "envoy/extensions/filters/network/dubbo_proxy/v3/dubbo_proxy.pb.validate.h"
 #include "envoy/registry/registry.h"
 
+#include "source/common/access_log/access_log_impl.h"
 #include "source/common/config/utility.h"
 #include "source/extensions/filters/network/dubbo_proxy/conn_manager.h"
 #include "source/extensions/filters/network/dubbo_proxy/filters/factory_base.h"
@@ -135,6 +136,10 @@ ConfigImpl::ConfigImpl(const DubboProxyConfig& config,
     for (const auto& filter_config : config.dubbo_filters()) {
       registerFilter(filter_config);
     }
+  }
+
+ for (const envoy::config::accesslog::v3::AccessLog& log_config : config.access_log()) {
+    access_logs_.emplace_back(AccessLog::AccessLogFactory::fromProto(log_config, context));
   }
 }
 
