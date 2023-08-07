@@ -57,6 +57,7 @@ public:
   using Parameters = std::vector<Hessian2::ObjectPtr>;
   using ParametersPtr = std::unique_ptr<Parameters>;
 
+
   class Attachment {
   public:
     using Map = Hessian2::UntypedMapObject;

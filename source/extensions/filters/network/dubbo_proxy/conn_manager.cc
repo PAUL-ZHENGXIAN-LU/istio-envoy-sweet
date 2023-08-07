@@ -157,14 +157,32 @@ void ConnectionManager::deferredMessage(ActiveMessage& message) {
   //stream_info_.addBytesReceived(1);
    // stream_info_.addBytesSent(2);
 
-  const Http::RequestHeaderMap* request_headers = nullptr;
+
+   ENVOY_LOG(debug, "active message end, start acess log");
+
+  Http::RequestHeaderMapPtr request_headers = Http::RequestHeaderMapImpl::create();
+  Http::RequestHeaderMap& rh = *(request_headers.get());
+  const Http::RequestHeaderMap* p_headers = request_headers.get();
   if(message.metadata() && message.metadata()->hasInvocationInfo()){
     const auto invocation = dynamic_cast<const RpcInvocationImpl*>(&(message.metadata()->invocationInfo()));
-    const auto p_headers = dynamic_cast<const Http::RequestHeaderMap*>(&(invocation->attachment().headers()));
-    request_headers =  p_headers;
+
+    if(invocation->hasAttachment()){
+      //Http::HeaderMapImpl::copyFrom(*((Http::HeaderMap*)p_headers), invocation->attachment().headers()); 
+      invocation->attachment().headers().iterate([&rh](const Http::HeaderEntry& header)->Http::HeaderMap::Iterate {
+        // TODO(mattklein123) PERF: Avoid copying here if not necessary.
+        Http::HeaderString key_string;
+        key_string.setCopy(header.key().getStringView());
+        Http::HeaderString value_string;
+        value_string.setCopy(header.value().getStringView());
+
+        rh.addViaMove(std::move(key_string), std::move(value_string));
+        return Http::HeaderMap::Iterate::Continue;
+      });
+    }
+    request_headers->addCopy(Http::LowerCaseString("X-ENVOY-ORIGINAL-PATH"),  invocation->serviceName());     
   }
  
- ENVOY_LOG(debug, "active message end, start acess log");
+ 
   auto response = Http::ResponseHeaderMapImpl::create();
   const Http::ResponseHeaderMap* response_headers = response.get();
   if(message.hasResponseDecoder() && message.response_decoder().metadata()){
@@ -172,7 +190,7 @@ void ConnectionManager::deferredMessage(ActiveMessage& message) {
     //response_headers->remove(lowcase_key);
     //response_headers->addCopy(lowcase_key, value);
   } 
-  emitLogEntry(request_headers, response_headers, message.streamInfo());
+  emitLogEntry(p_headers, response_headers, message.streamInfo());
 
   read_callbacks_->connection().dispatcher().deferredDelete(
       message.removeFromList(active_message_list_));

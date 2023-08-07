@@ -217,3 +217,21 @@ envoy_extension_cc_test(
         "@envoy_api//envoy/extensions/filters/network/dubbo_proxy/v3:pkg_cc_proto",
     ],
 )
+
+envoy_extension_cc_test(
+    name = "rpc_accesslog_test",
+    srcs = ["rpc_accesslog_test.cc"],
+    extension_names = ["envoy.filters.network.dubbo_proxy"],
+    deps = [
+        ":mocks_lib",
+        ":utility_lib",
+        "//source/extensions/access_loggers/file:config",
+        "//source/extensions/filters/network/dubbo_proxy:config",
+        "//source/extensions/filters/network/dubbo_proxy:conn_manager_lib",
+        "//source/extensions/filters/network/dubbo_proxy:dubbo_hessian2_serializer_impl_lib",
+        "//source/extensions/filters/network/dubbo_proxy:dubbo_protocol_impl_lib",
+        "//test/common/stats:stat_test_utility_lib",
+        "//test/mocks/server:factory_context_mocks",
+        "@envoy_api//envoy/extensions/filters/network/dubbo_proxy/v3:pkg_cc_proto",
+    ],
+)
