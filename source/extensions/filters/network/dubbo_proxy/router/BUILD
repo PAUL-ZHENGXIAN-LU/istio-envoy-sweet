@@ -65,6 +65,7 @@ envoy_cc_library(
         "//source/common/http:header_utility_lib",
         "//source/common/router:metadatamatchcriteria_lib",
         "//source/common/upstream:load_balancer_lib",
+        "//source/common/stream_info:stream_info_lib",
         "//source/extensions/filters/network/dubbo_proxy:app_exception_lib",
         "//source/extensions/filters/network/dubbo_proxy:protocol_interface",
         "//source/extensions/filters/network/dubbo_proxy:serializer_interface",

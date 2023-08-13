@@ -6,6 +6,9 @@
 #include "source/extensions/filters/network/dubbo_proxy/app_exception.h"
 #include "source/extensions/filters/network/dubbo_proxy/message_impl.h"
 
+#include "source/common/stream_info/stream_info_impl.h"
+
+
 namespace Envoy {
 namespace Extensions {
 namespace NetworkFilters {
@@ -55,6 +58,8 @@ FilterStatus Router::onMessageDecoded(MessageMetadataSharedPtr metadata, Context
   cluster_ = cluster->info();
   ENVOY_STREAM_LOG(debug, "dubbo router: cluster '{}' match for interface '{}'", *callbacks_,
                    route_entry_->clusterName(), invocation.serviceName());
+  
+  callbacks_->streamInfo().setUpstreamClusterInfo(cluster_);
 
   if (cluster_->maintenanceMode()) {
     callbacks_->sendLocalReply(
@@ -363,6 +368,11 @@ void Router::UpstreamRequest::onRequestStart(bool continue_decoding) {
   if (continue_decoding) {
     parent_.callbacks_->continueDecoding();
   }
+
+  auto upstream_info = std::make_shared<StreamInfo::UpstreamInfoImpl>();
+  upstream_info->setUpstreamHost(upstream_host_);
+  parent_.callbacks_->streamInfo().setUpstreamInfo(std::move(upstream_info));
+
   onRequestComplete();
 }
 

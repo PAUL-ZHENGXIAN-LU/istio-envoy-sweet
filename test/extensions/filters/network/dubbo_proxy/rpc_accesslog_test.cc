@@ -10,12 +10,28 @@
 #include "source/extensions/filters/network/dubbo_proxy/message_impl.h"
 #include "source/extensions/filters/network/dubbo_proxy/router/rds_impl.h"
 
+
+#include "envoy/config/accesslog/v3/accesslog.pb.h"
+#include "envoy/extensions/access_loggers/file/v3/file.pb.h"
+#include "envoy/registry/registry.h"
+
+#include "source/common/access_log/access_log_impl.h"
+#include "source/common/protobuf/protobuf.h"
+#include "source/extensions/access_loggers/common/file_access_log_impl.h"
+#include "source/extensions/access_loggers/file/config.h"
+#include "source/common/stream_info/stream_info_impl.h"
+#include "source/common/network/address_impl.h"
+
 #include "test/common/stats/stat_test_utility.h"
 #include "test/extensions/filters/network/dubbo_proxy/mocks.h"
 #include "test/extensions/filters/network/dubbo_proxy/utility.h"
 #include "test/mocks/network/mocks.h"
 #include "test/mocks/server/factory_context.h"
 #include "test/test_common/printers.h"
+#include "test/test_common/test_time.h"
+
+#include "envoy/stream_info/filter_state.h"
+
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -25,6 +41,28 @@ using testing::InSequence;
 using testing::Invoke;
 using testing::NiceMock;
 using testing::Return;
+using Envoy::StreamInfo::UpstreamInfoImpl;
+using Envoy::StreamInfo::ResponseCodeDetails;
+using Envoy::StreamInfo::StreamInfoImpl;
+
+
+namespace Envoy {
+namespace StreamInfo {
+
+class TestIntAccessor : public FilterState::Object {
+public:
+  TestIntAccessor(int value) : value_(value) {}
+
+  int access() const { return value_; }
+
+private:
+  int value_;
+};
+
+} // namespace StreamInfo
+} // namespace Envoy
+
+
 
 namespace Envoy {
 namespace Extensions {
@@ -33,14 +71,164 @@ namespace DubboProxy {
 
 using ConfigDubboProxy = envoy::extensions::filters::network::dubbo_proxy::v3::DubboProxy;
 
+class TestAccesslogContext {
+public:
+  TestAccesslogContext(Server::Configuration::MockFactoryContext& context, const std::string& accesslog_yaml)
+      : context_(context) {
+
+        std::shared_ptr<Network::ConnectionInfoSetterImpl> conn = create_connection();
+        
+        stream_info_ = std::make_shared<StreamInfoImpl>(Http::Protocol::Http2, context.mainThreadDispatcher().timeSource(), conn);
+        GTEST_LOG_(INFO) << "init stream_info_"; 
+        initAccesslog(accesslog_yaml); 
+  }
+
+  std::shared_ptr<Network::ConnectionInfoSetterImpl> create_connection(){
+
+     Network::Address::InstanceConstSharedPtr local =
+      Network::Utility::parseInternetAddress("1.2.3.4", 123, false);
+    Network::Address::InstanceConstSharedPtr remote =
+        Network::Utility::parseInternetAddress("10.20.30.40", 456, false);
+    Network::Address::InstanceConstSharedPtr upstream_address =
+        Network::Utility::parseInternetAddress("10.1.2.3", 679, false);
+    Network::Address::InstanceConstSharedPtr upstream_local_address =
+        Network::Utility::parseInternetAddress("10.1.2.3", 1000, false);
+    const std::string sni_name = "kittens.com";    
+
+    std::shared_ptr<Network::ConnectionInfoSetterImpl> connection_info_provider = std::make_shared<Network::ConnectionInfoSetterImpl>(
+        local, remote);  
+
+    //NiceMock<StreamInfo::MockStreamInfo> info;
+    //std::shared_ptr<NiceMock<Envoy::Upstream::MockHostDescription>> upstream_host( new NiceMock<Envoy::Upstream::MockHostDescription>());
+
+    //auto downstream_ssl_info = std::make_shared<NiceMock<Ssl::MockConnectionInfo>>();
+    //auto upstream_ssl_info = std::make_shared<NiceMock<Ssl::MockConnectionInfo>>();
+    //ConnectionWrapper connection(info);
+    //UpstreamWrapper upstream(info);
+    //PeerWrapper source(info, false);
+    //PeerWrapper destination(info, true);
+    //connection_info_provider->setRequestedServerName(sni_name);
+    //connection_info_provider->setSslConnection(downstream_ssl_info);
+
+    return connection_info_provider;
+
+  }
+
+  void initAccesslog(const std::string& accesslog_yaml) {
+    envoy::extensions::access_loggers::file::v3::FileAccessLog fal_config;
+    TestUtility::loadFromYaml(accesslog_yaml, fal_config);
+
+    GTEST_LOG_(INFO) << "accesslog_yaml=" << accesslog_yaml; 
+
+    
+    accesslog_config_.mutable_typed_config()->PackFrom(fal_config);
+
+    //file_ = std::make_shared<AccessLog::MockAccessLogFile>();
+    Filesystem::FilePathAndType file_info{Filesystem::DestinationType::File, fal_config.path()};
+
+    GTEST_LOG_(INFO) << "init accesslog mock, path=" << fal_config.path();    
+    
+    stream_info_->protocol(Http::Protocol::Http10);
+    stream_info_->response_code_ = 200;
+    stream_info_->setResponseFlag(StreamInfo::ResponseFlag::UpstreamConnectionFailure);    
+
+    stream_info_->setAttemptCount(93);
+    stream_info_->setResponseCodeDetails(ResponseCodeDetails::get().ViaUpstream);
+    stream_info_->setConnectionTerminationDetails("access_denied");
+
+    stream_info_->setUpstreamInfo(std::make_shared<UpstreamInfoImpl>());
+    host_description->hostname_ = "myhost";
+    stream_info_->upstreamInfo()->setUpstreamHost(host_description);
+    auto local_address = Network::Address::InstanceConstSharedPtr{
+      new Network::Address::Ipv4Instance("127.0.0.3", 8443)};
+    stream_info_->upstreamInfo()->setUpstreamLocalAddress(local_address);
+
+
+    stream_info_->healthCheck(true);
+    std::shared_ptr<NiceMock<Envoy::Router::MockRoute>> route =
+        std::make_shared<NiceMock<Envoy::Router::MockRoute>>();
+        Envoy::Router::RouteConstSharedPtr route2 = route;
+    stream_info_->route_ = route2;
+    stream_info_->setRouteName("dubbo_local");
+
+    stream_info_->filterState()->setData("test", std::make_unique<StreamInfo::TestIntAccessor>(1),
+                                       StreamInfo::FilterState::StateType::ReadOnly,
+                                       StreamInfo::FilterState::LifeSpan::FilterChain);
+    stream_info_->upstreamInfo()->setUpstreamFilterState(stream_info_->filterState());
+
+     const std::string session_id =
+        "D62A523A65695219D46FE1FFE285A4C371425ACE421B110B5B8D11D3EB4D5F0B";
+    auto ssl_info = std::make_shared<Ssl::MockConnectionInfo>();
+    EXPECT_CALL(*ssl_info, sessionId()).WillRepeatedly(testing::ReturnRef(session_id));
+    stream_info_->upstreamInfo()->setUpstreamSslConnection(ssl_info);
+    stream_info_->upstreamInfo()->setUpstreamConnectionId(12345);
+    stream_info_->upstreamInfo()->setUpstreamInterfaceName("lo");
+
+
+
+    cluster_info_->name_ = "my cluster";
+    cluster_info_->observability_name_ = "my cluster";
+    Upstream::ClusterInfoConstSharedPtr cluster_info = cluster_info_;    
+    stream_info_->setUpstreamClusterInfo(cluster_info);
+
+    //EXPECT_CALL(stream_info_, upstreamClusterInfo())
+    //    .WillRepeatedly(::testing::Return(upstream_cluster_info_));
+    
+    //EXPECT_CALL(context_.access_log_manager_, createAccessLog(file_info)).WillRepeatedly(Return(file_));
+
+    EXPECT_CALL(*(context_.access_log_manager_.file_.get()), write(_)).WillRepeatedly(Invoke([](absl::string_view got) {
+      
+        GTEST_LOG_(INFO) << "access log=" << got; 
+    }));
+
+  }
+
+  void testLog(bool is_json) {
+
+    AccessLog::InstanceSharedPtr logger = AccessLog::AccessLogFactory::fromProto(accesslog_config_, context_);
+
+    absl::Time abslStartTime =
+        TestUtility::parseTime("Dec 18 01:50:34 2018 GMT", "%b %e %H:%M:%S %Y GMT");
+    stream_info_->start_time_ = absl::ToChronoTime(abslStartTime);    
+
+    stream_info_->response_code_ = 200;
+
+    GTEST_LOG_(INFO) << "access mock: is_json=" << is_json << "host name=" << host_description->cluster().name() 
+      << ", clustername=" << stream_info_->upstreamClusterInfo().value()->observabilityName(); 
+
+    
+    Envoy::StreamInfo::StreamInfo &ss = *stream_info_;
+    logger->log(&request_headers_, &response_headers_, &response_trailers_, ss);
+  }
+
+  Server::Configuration::MockFactoryContext &context_;
+  envoy::config::accesslog::v3::AccessLog accesslog_config_;
+  Http::TestRequestHeaderMapImpl request_headers_{{":method", "GET"}, {":path", "/bar/foo"}, {"X-REQUEST-ID", "43de45ad6790-ae34"}};
+  Http::TestResponseHeaderMapImpl response_headers_;
+  Http::TestResponseTrailerMapImpl response_trailers_;
+  //NiceMock<StreamInfo::MockStreamInfo> stream_info_;
+  
+  std::shared_ptr<StreamInfoImpl> stream_info_;
+
+  std::shared_ptr<Upstream::MockClusterInfo> cluster_info_{new testing::NiceMock<Upstream::MockClusterInfo>()};
+  
+  //absl::optional<Upstream::ClusterInfoConstSharedPtr> upstream_cluster_info_ = cluster_info_;
+
+  std::shared_ptr<NiceMock<Envoy::Upstream::MockHostDescription>> host_description{
+      new NiceMock<Envoy::Upstream::MockHostDescription>()};
+
+};
+
+
 class RpcAccesslogTest;
 class TestConfigImpl : public ConfigImpl {
 public:
   TestConfigImpl(ConfigDubboProxy proto_config, Server::Configuration::MockFactoryContext& context,
                  Router::RouteConfigProviderManager& route_config_provider_manager,
                  DubboFilterStats& stats)
-      : ConfigImpl(proto_config, context, route_config_provider_manager), stats_(stats) {}
-
+      : ConfigImpl::ConfigImpl(proto_config, context, route_config_provider_manager), stats_(stats){
+        
+  }
   // ConfigImpl
   DubboFilterStats& stats() override { return stats_; }
   void createFilterChain(DubboFilters::FilterChainFactoryCallbacks& callbacks) override {
@@ -145,7 +333,7 @@ public:
           path: /tmp/envoy_dubbo_acc.log
           log_format:
             text_format_source:
-              inline_string: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH):256% %PROTOCOL%\" %RESPONSE_CODE% %RESPONSE_FLAGS% %ROUTE_NAME% %BYTES_RECEIVED% %BYTES_SENT% %UPSTREAM_WIRE_BYTES_RECEIVED% %UPSTREAM_WIRE_BYTES_SENT% %DURATION% %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% \"%REQ(X-FORWARDED-FOR)%\" \"%REQ(USER-AGENT)%\" \"%REQ(X-REQUEST-ID)%\"  \"%REQ(:AUTHORITY)%\"\n"
+              inline_string: "[%START_TIME%] \"%REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH):256% %PROTOCOL%\" upstream_cluster=%UPSTREAM_CLUSTER% uid=%CLUSTER_METADATA(istio:appid)% h=%REQ(HOST)% %RESPONSE_CODE% %RESPONSE_FLAGS% %ROUTE_NAME% %BYTES_RECEIVED% %BYTES_SENT% %UPSTREAM_WIRE_BYTES_RECEIVED% %UPSTREAM_WIRE_BYTES_SENT% %DURATION% %RESP(X-ENVOY-UPSTREAM-SERVICE-TIME)% \"%REQ(X-FORWARDED-FOR)%\" \"%REQ(USER-AGENT)%\" \"%REQ(X-REQUEST-ID)%\"  \"%REQ(:AUTHORITY)%\"\n"
       - name: accesslog2
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog
@@ -154,7 +342,17 @@ public:
     )EOF";
 
 
-    initializeFilter("");
+    const std::string accesslog_yaml = 
+       R"(
+  path: "/tmp/envoy_dubbo_acc.log"
+  log_format:
+    text_format_source:
+      inline_string: "plain_text - %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% upstream_cluster=%UPSTREAM_CLUSTER% u_host=%UPSTREAM_HOST% h=%REQ(HOST)% res_code=%RESPONSE_CODE% res_f=%RESPONSE_FLAGS% rn=%ROUTE_NAME% req: rid=%REQ(X-REQUEST-ID)%"
+)";
+
+    accesslog_context_ = std::make_shared<TestAccesslogContext>(factory_context_, accesslog_yaml); 
+
+    initializeFilter(yaml);
   }
 
   void initializeFilter(const std::string& yaml) {
@@ -172,6 +370,9 @@ public:
     proto_config_.set_stat_prefix("test");
     config_ = std::make_unique<TestConfigImpl>(proto_config_, factory_context_,
                                                *route_config_provider_manager_, stats_);
+
+    accesslog_context_->testLog(false);
+    
     if (custom_serializer_) {
       config_->serializer_ = custom_serializer_;
     }
@@ -359,6 +560,8 @@ public:
   MockSerializer* custom_serializer_{};
   MockProtocol* custom_protocol_{};
   ScopedInjectableLoader<Regex::Engine> engine_;
+
+  std::shared_ptr<TestAccesslogContext> accesslog_context_;  
 };
 
 TEST_F(RpcAccesslogTest, OnDataHandlesRequestTwoWay) {
