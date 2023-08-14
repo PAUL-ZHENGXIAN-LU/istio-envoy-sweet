@@ -129,7 +129,7 @@ public:
     GTEST_LOG_(INFO) << "init accesslog mock, path=" << fal_config.path();    
     
     stream_info_->protocol(Http::Protocol::Http10);
-    stream_info_->response_code_ = 200;
+    stream_info_->setResponseCode(Http::Code::OK);
     stream_info_->setResponseFlag(StreamInfo::ResponseFlag::UpstreamConnectionFailure);    
 
     stream_info_->setAttemptCount(93);

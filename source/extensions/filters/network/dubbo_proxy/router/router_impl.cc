@@ -34,6 +34,8 @@ FilterStatus Router::onMessageDecoded(MessageMetadataSharedPtr metadata, Context
   if (!route_) {
     ENVOY_STREAM_LOG(debug, "dubbo router: no cluster match for interface '{}'", *callbacks_,
                      invocation.serviceName());
+    callbacks_->streamInfo().setResponseCode(Http::Code::NotFound);
+    callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::NoRouteFound);
     callbacks_->sendLocalReply(AppException(ResponseStatus::ServiceNotFound,
                                             fmt::format("dubbo router: no route for interface '{}'",
                                                         invocation.serviceName())),
@@ -48,6 +50,8 @@ FilterStatus Router::onMessageDecoded(MessageMetadataSharedPtr metadata, Context
   if (!cluster) {
     ENVOY_STREAM_LOG(debug, "dubbo router: unknown cluster '{}'", *callbacks_,
                      route_entry_->clusterName());
+    callbacks_->streamInfo().setResponseCode(Http::Code::NotFound);
+    callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::NoClusterFound);                 
     callbacks_->sendLocalReply(
         AppException(ResponseStatus::ServerError, fmt::format("dubbo router: unknown cluster '{}'",
                                                               route_entry_->clusterName())),
@@ -62,6 +66,7 @@ FilterStatus Router::onMessageDecoded(MessageMetadataSharedPtr metadata, Context
   callbacks_->streamInfo().setUpstreamClusterInfo(cluster_);
 
   if (cluster_->maintenanceMode()) {
+
     callbacks_->sendLocalReply(
         AppException(ResponseStatus::ServerError,
                      fmt::format("dubbo router: maintenance mode for cluster '{}'",
@@ -72,6 +77,8 @@ FilterStatus Router::onMessageDecoded(MessageMetadataSharedPtr metadata, Context
 
   auto conn_pool_data = cluster->tcpConnPool(Upstream::ResourcePriority::Default, this);
   if (!conn_pool_data) {
+    callbacks_->streamInfo().setResponseCode(Http::Code::ServiceUnavailable);
+    callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::NoHealthyUpstream);
     callbacks_->sendLocalReply(
         AppException(
             ResponseStatus::ServerError,
@@ -145,6 +152,8 @@ FilterStatus Router::onMessageEncoded(MessageMetadataSharedPtr metadata, Context
     }
     break;
   case ResponseStatus::ServerTimeout:
+    callbacks_->streamInfo().setResponseCode(499);
+    callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::DownstreamConnectionTermination);
     upstream_request_->upstream_host_->outlierDetector().putResult(
         Upstream::Outlier::Result::LocalOriginTimeout);
     break;
@@ -401,6 +410,8 @@ void Router::UpstreamRequest::onResetStream(ConnectionPool::PoolFailureReason re
   // triggers the release of the current stream at the end of the filter's callback.
   switch (reason) {
   case ConnectionPool::PoolFailureReason::Overflow:
+    parent_.callbacks_->streamInfo().setResponseCode(Http::Code::TooManyRequests);
+    parent_.callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::UpstreamOverflow); 
     parent_.callbacks_->sendLocalReply(
         AppException(ResponseStatus::ServerError,
                      fmt::format("dubbo upstream request: too many connections")),
@@ -409,6 +420,8 @@ void Router::UpstreamRequest::onResetStream(ConnectionPool::PoolFailureReason re
   case ConnectionPool::PoolFailureReason::LocalConnectionFailure:
     // Should only happen if we closed the connection, due to an error condition, in which case
     // we've already handled any possible downstream response.
+    parent_.callbacks_->streamInfo().setResponseCode(Http::Code::BadGateway);
+    parent_.callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::UpstreamConnectionFailure);    
     parent_.callbacks_->sendLocalReply(
         AppException(ResponseStatus::ServerError,
                      fmt::format("dubbo upstream request: local connection failure '{}'",
@@ -416,6 +429,8 @@ void Router::UpstreamRequest::onResetStream(ConnectionPool::PoolFailureReason re
         false);
     break;
   case ConnectionPool::PoolFailureReason::RemoteConnectionFailure:
+    parent_.callbacks_->streamInfo().setResponseCode(Http::Code::BadGateway);
+    parent_.callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::UpstreamConnectionFailure); 
     parent_.callbacks_->sendLocalReply(
         AppException(ResponseStatus::ServerError,
                      fmt::format("dubbo upstream request: remote connection failure '{}'",
@@ -423,6 +438,8 @@ void Router::UpstreamRequest::onResetStream(ConnectionPool::PoolFailureReason re
         false);
     break;
   case ConnectionPool::PoolFailureReason::Timeout:
+    parent_.callbacks_->streamInfo().setResponseCode(Http::Code::GatewayTimeout);
+    parent_.callbacks_->streamInfo().setResponseFlag(StreamInfo::ResponseFlag::UpstreamRequestTimeout); 
     parent_.callbacks_->sendLocalReply(
         AppException(ResponseStatus::ServerError,
                      fmt::format("dubbo upstream request: connection failure '{}' due to timeout",
